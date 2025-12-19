@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Painel</h2>
+<p>Bem-vindo(a), <strong>{{ current_user.nome }}</strong>!</p>
+
+<!-- RESUMO DO DIA -->
+<div class="card-page mb-3" style="padding: 18px; background: #f0fdf4; border-left: 5px solid var(--success);">
+    <h3 style="margin-top:0; color: var(--success);">📊 Resumo do Dia - Hoje</h3>
+    <div class="row">
+        <div class="col">
+            <strong>Vendas realizadas:</strong> {{ qtd_vendas }}<br>
+            <strong>Total vendido:</strong> <span style="color: var(--success); font-size:1.2em;">R$ {{ "%.2f"|format(total_vendas_dia) }}</span>
+        </div>
+        <div class="col">
+            <strong>Custo total:</strong> R$ {{ "%.2f"|format(total_custo_dia) }}<br>
+            <strong>Lucro do dia:</strong> 
+            <span style="color: {% if lucro_dia >= 0 %}var(--success){% else %}var(--danger){% endif %}; font-size:1.2em; font-weight:bold;">
+                R$ {{ "%.2f"|format(lucro_dia) }}
+            </span>
+        </div>
+    </div>
+</div>
+
+<h3>Ações rápidas</h3>
+<ul style="font-size:1.1em;">
+    <li><a href="{{ url_for('venda') }}">💰 Ir para Vendas</a></li>
+    <li><a href="{{ url_for('cardapio') }}">📋 Ver Cardápio</a></li>
+    <li><a href="{{ url_for('estoque') }}">📦 Gerenciar Estoque</a></li>
+    <li><a href="{{ url_for('historico') }}">📈 Ver Histórico de Vendas</a></li>
+    {% if current_user.tipo == 'gerente' %}
+    <li><a href="{{ url_for('relatorios') }}">📊 Relatórios</a></li>
+    <li><a href="{{ url_for('usuarios') }}">👥 Gerenciar Usuários</a></li>
+    <li><a href="{{ url_for('backup') }}" style="color: var(--success); font-weight: bold;">💾 Fazer Backup do Banco de Dados</a></li>
+    <li><a href="{{ url_for('restaurar_backup') }}" style="color: var(--danger); font-weight: bold;">⚠️ Restaurar Backup (Substituir Dados Atuais)</a></li>
+    {% endif %}
+</ul>
+
+<p class="text-muted" style="margin-top: 30px;">
+    Sistema Sabor Mix - Controle simples e eficiente para sua lanchonete.
+</p>
+{% endblock %}

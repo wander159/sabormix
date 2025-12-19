@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Cardápio</h2>
+<p>Itens puxados diretamente do estoque (somente produtos com estoque &gt; 0).</p>
+
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Nome</th>
+                <th>Estoque</th>   <!-- <<< MOVIDO PARA LOGO APÓS O NOME -->
+                <th>Classe</th>
+                <th>Preço (R$)</th>
+            </tr>
+        </thead>
+
+        <tbody>
+        {% for it in itens %}
+            <tr>
+                <td>{{ it.nome }}</td>
+                <td>{{ it.estoque }}</td>  <!-- <<< NOVA POSIÇÃO -->
+                <td>{{ it.classe or '' }}</td>
+                <td>R$ {{ "%.2f"|format(it.preco) }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
