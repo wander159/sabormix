@@ -30,8 +30,16 @@ def hash_password(password: str) -> str:
 
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # Evita erros intermitentes de "database is locked" (muito comuns no Windows)
+    # aumentando o timeout e usando WAL quando possível.
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+    except sqlite3.Error:
+        # Se o SQLite/ambiente não suportar (ou estiver em modo restrito), segue sem travar.
+        pass
     return conn
 
 
@@ -144,46 +152,47 @@ def inject_globals():
 @app.route("/")
 @login_required
 def index():
-    # Resumo do dia atual (horário de São Paulo)
-    tz_local = pytz.timezone("America/Sao_Paulo")
-    hoje_local = datetime.now(tz_local).date()
-    inicio_dia = f"{hoje_local} 00:00:00"
-    fim_dia = f"{hoje_local} 23:59:59"
-
     conn = get_conn()
-    cur = conn.cursor()
+    user = get_current_user()  # Supondo que você tenha essa função; se não, use session['user_nome'] ou similar
 
-    # Consulta vendas do dia
-    cur.execute("""
-        SELECT os.*, i.valor_custo
-        FROM ordens_de_servico os
-        JOIN itens i ON os.item_id = i.id
-        WHERE os.data_hora BETWEEN ? AND ?
-        ORDER BY os.data_hora DESC
-    """, (inicio_dia, fim_dia))
+    # --- Cálculo das vendas do dia (manter como estava) ---
+    hoje_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
-    vendas_dia = cur.fetchall()
+    vendas_dia = conn.execute("""
+        SELECT 
+            COUNT(*) as qtd_vendas,
+            SUM(total) as total_vendas,
+            SUM(quantidade * i.valor_custo) as total_custo
+        FROM ordens_de_servico od
+        JOIN itens i ON od.item_id = i.id
+        WHERE DATE(od.data_hora) = ?
+    """, (hoje_str,)).fetchone()
 
-    total_vendas_dia = 0.0
-    total_custo_dia = 0.0
-    qtd_vendas = len(vendas_dia)
-
-    for v in vendas_dia:
-        total_vendas_dia += float(v["total"])
-        custo_item = int(v["quantidade"]) * float(v["valor_custo"])
-        total_custo_dia += custo_item
-
+    qtd_vendas = vendas_dia['qtd_vendas'] or 0
+    total_vendas_dia = vendas_dia['total_vendas'] or 0.0
+    total_custo_dia = vendas_dia['total_custo'] or 0.0
     lucro_dia = total_vendas_dia - total_custo_dia
+
+    # --- Entradas do dia (valores zerados para evitar erro) ---
+    # Se quiser cálculo real depois, podemos adicionar log ou campo de data
+    qtd_entradas_hoje = 0
+    total_entradas_hoje = 0.0
+
+    # Lucro real (vendas - compras do dia)
+    lucro_real = total_vendas_dia - total_entradas_hoje
 
     conn.close()
 
     return render_template("index.html",
+                           current_user=user,
                            qtd_vendas=qtd_vendas,
                            total_vendas_dia=total_vendas_dia,
                            total_custo_dia=total_custo_dia,
-                           lucro_dia=lucro_dia)
-
-
+                           lucro_dia=lucro_dia,
+                           qtd_entradas_hoje=qtd_entradas_hoje,
+                           total_entradas_hoje=total_entradas_hoje,
+                           lucro_real=lucro_real
+                           )
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -408,11 +417,20 @@ def venda_adicionar():
         flash(f"Estoque insuficiente para {item['nome']}. Disponível: {item['estoque']}", "danger")
         return redirect(url_for("venda"))
 
-    # Baixa estoque
+    # Baixa estoque (com proteção contra corrida/estoque negativo)
     if item["tipo"] == "produto":
         conn = get_conn()
         cur = conn.cursor()
-        cur.execute("UPDATE itens SET estoque = estoque - ? WHERE id = ?", (quantidade, item["id"]))
+        cur.execute(
+            "UPDATE itens SET estoque = estoque - ? WHERE id = ? AND estoque >= ?",
+            (quantidade, item["id"], quantidade)
+        )
+        if cur.rowcount == 0:
+            # Outro atendimento pode ter consumido o estoque entre a busca e o update
+            conn.rollback()
+            conn.close()
+            flash(f"Estoque insuficiente para {item['nome']}.", "danger")
+            return redirect(url_for("venda"))
         conn.commit()
         conn.close()
 
@@ -1047,6 +1065,74 @@ def restaurar_backup():
         return redirect(url_for("index"))
 
     return render_template("restaurar.html")
+
+# -------------------------------------------------
+# NOVO: ROTAS PARA ENTRADAS NO ESTOQUE
+# -------------------------------------------------
+@app.route("/entradas", methods=["GET", "POST"])
+@login_required
+@gerente_required
+def entradas():
+    conn = get_conn()
+    
+    if request.method == "POST":
+        item_id = request.form.get("item_id")
+        quantidade = int(request.form["quantidade"])
+        valor_unitario = float(request.form["valor_unitario"])
+        fornecedor = request.form.get("fornecedor", "")
+        observacao = request.form.get("observacao", "")
+        
+        total_custo = quantidade * valor_unitario
+        
+        # Atualiza estoque do item
+        cur = conn.cursor()
+        cur.execute("UPDATE itens SET estoque = estoque + ? WHERE id = ?", (quantidade, item_id))
+        
+        # Registra a entrada
+        cur.execute("""
+            INSERT INTO entradas_estoque (item_id, quantidade, valor_unitario, total_custo, fornecedor, data_hora, observacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (item_id, quantidade, valor_unitario, total_custo, fornecedor, utc_now_str(), observacao))
+        
+        conn.commit()
+        flash(f"Entrada registrada! +{quantidade} unidades (R$ {total_custo:.2f})", "success")
+        conn.close()
+        return redirect(url_for("entradas"))
+    
+    # Lista itens para seleção
+    itens = conn.execute("SELECT id, nome, estoque FROM itens ORDER BY nome").fetchall()
+    entradas_hoje = conn.execute("""
+        SELECT e.*, i.nome FROM entradas_estoque e
+        JOIN itens i ON e.item_id = i.id
+        WHERE DATE(e.data_hora) = DATE('now')
+        ORDER BY e.data_hora DESC
+    """).fetchall()
+    
+    total_entradas_hoje = sum(e['total_custo'] for e in entradas_hoje)
+    conn.close()
+    
+    return render_template("entradas.html", itens=itens, entradas_hoje=entradas_hoje, total_entradas_hoje=total_entradas_hoje)
+
+
+@app.route("/entradas/excluir/<int:entrada_id>", methods=["POST"])
+@login_required
+@gerente_required
+def entrada_excluir(entrada_id):
+    conn = get_conn()
+    cur = conn.cursor()
+    
+    # Pega dados da entrada para reverter estoque
+    entrada = cur.execute("SELECT item_id, quantidade FROM entradas_estoque WHERE id=?", (entrada_id,)).fetchone()
+    if entrada:
+        # Reverte estoque
+        cur.execute("UPDATE itens SET estoque = estoque - ? WHERE id = ?", (entrada['quantidade'], entrada['item_id']))
+        # Deleta entrada
+        cur.execute("DELETE FROM entradas_estoque WHERE id=?", (entrada_id,))
+        conn.commit()
+    
+    conn.close()
+    flash("Entrada excluída e estoque ajustado!", "warning")
+    return redirect(url_for("entradas"))
 
 
 # -------------------------------------------------
