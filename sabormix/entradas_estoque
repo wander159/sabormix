@@ -1,0 +1,22 @@
+import sqlite3
+conn = sqlite3.connect('oficina.db')
+cur = conn.cursor()
+
+cur.execute("""
+    CREATE TABLE IF NOT EXISTS entradas_estoque (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_id INTEGER,
+        quantidade INTEGER NOT NULL,
+        valor_unitario REAL NOT NULL,
+        total_custo REAL NOT NULL,
+        fornecedor TEXT,
+        data_hora TEXT,
+        observacao TEXT,
+        FOREIGN KEY (item_id) REFERENCES itens(id)
+    )
+""")
+
+conn.commit()
+conn.close()
+print("Tabela criada!")
+exit()

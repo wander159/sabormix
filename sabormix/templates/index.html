@@ -9,8 +9,7 @@
     <div class="row">
         <div class="col">
             <strong>Vendas realizadas:</strong> {{ qtd_vendas }}<br>
-            <strong>Total vendido:</strong> 
-            <span style="color: var(--success); font-size:1.2em;">R$ {{ "%.2f"|format(total_vendas_dia) }}</span>
+            <strong>Total vendido:</strong> <span style="color: var(--success); font-size:1.2em;">R$ {{ "%.2f"|format(total_vendas_dia) }}</span>
         </div>
         <div class="col">
             <strong>Custo total:</strong> R$ {{ "%.2f"|format(total_custo_dia) }}<br>
@@ -18,15 +17,6 @@
             <span style="color: {% if lucro_dia >= 0 %}var(--success){% else %}var(--danger){% endif %}; font-size:1.2em; font-weight:bold;">
                 R$ {{ "%.2f"|format(lucro_dia) }}
             </span>
-        </div>
-        <!-- Novas informações adicionadas -->
-        <div class="col">
-            <strong>Entradas hoje:</strong> {{ qtd_entradas_hoje }} itens<br>
-            <strong>Total comprado:</strong> 
-            <span style="color: var(--danger); font-size:1.2em;">R$ {{ "%.2f"|format(total_entradas_hoje) }}</span>
-        </div>
-        <div class="col">
-
         </div>
     </div>
 </div>
